@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
+#include <drivers/entropy.h>
 #include <drivers/bluetooth/hci_driver.h>
 #include <bluetooth/controller.h>
 #include <bluetooth/hci_vs.h>
@@ -15,6 +16,7 @@
 #include <stdbool.h>
 
 #include <sdc.h>
+#include <sdc_soc.h>
 #include <sdc_hci.h>
 #include <sdc_hci_vs.h>
 #include "multithreading_lock.h"
@@ -354,9 +356,7 @@ static void recv_thread(void *p1, void *p2, void *p3)
 			/* Wait for a signal from the controller. */
 			k_sem_take(&sem_recv, K_FOREVER);
 		}
-
 		received_evt = fetch_and_process_hci_evt(&hci_buffer[0]);
-
 		if (IS_ENABLED(CONFIG_BT_CONN)) {
 			received_data = fetch_and_process_acl_data(&hci_buffer[0]);
 		}
@@ -370,6 +370,32 @@ void host_signal(void)
 {
 	/* Wake up the RX event/data thread */
 	k_sem_give(&sem_recv);
+}
+
+
+static const struct device *entropy_source;
+
+static uint8_t rand_prio_low_vector_get(uint8_t *p_buff, uint8_t length)
+{
+	int32_t l = entropy_get_entropy_isr(entropy_source, p_buff, length, 0);
+
+	BT_ASSERT(l == length); //assert because bits are wasted here if we can't fill the buffer
+	return l;
+}
+
+static uint8_t rand_prio_high_vector_get(uint8_t *p_buff, uint8_t length)
+{
+	uint8_t l = entropy_get_entropy_isr(entropy_source, p_buff, length, 0);
+
+	BT_ASSERT(l >= 0);
+	return l;
+}
+
+static void rand_prio_low_vector_get_blocking(uint8_t *p_buff, uint8_t length)
+{
+	int32_t err = entropy_get_entropy(entropy_source, p_buff, length);
+
+	BT_ASSERT(err == 0);
 }
 
 static int hci_driver_open(void)
@@ -445,6 +471,24 @@ static int hci_driver_open(void)
 		k_panic();
 		/* No return from k_panic(). */
 		return -ENOMEM;
+	}
+
+	entropy_source = device_get_binding(DT_LABEL(DT_NODELABEL(rng)));
+	if (!entropy_source) {
+		BT_ERR("An entropy source is required");
+		return -EINVAL;
+	}
+
+	sdc_rand_source_t rand_functions = {
+		.rand_prio_low_get = rand_prio_low_vector_get,
+		.rand_prio_high_get = rand_prio_high_vector_get,
+		.rand_poll = rand_prio_low_vector_get_blocking
+	};
+
+	err = sdc_rand_source_register(&rand_functions);
+	if (err) {
+		BT_ERR("Failed to register randomness source with the SoftDevice Controller");
+		return -EINVAL;
 	}
 
 	if (IS_ENABLED(CONFIG_BT_BROADCASTER)) {

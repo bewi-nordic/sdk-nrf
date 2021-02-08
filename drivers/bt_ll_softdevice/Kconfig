@@ -4,5 +4,4 @@
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
 #
 
-rsource "entropy/Kconfig"
 rsource "flash/Kconfig"
