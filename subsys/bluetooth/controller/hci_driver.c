@@ -356,7 +356,9 @@ static void recv_thread(void *p1, void *p2, void *p3)
 			/* Wait for a signal from the controller. */
 			k_sem_take(&sem_recv, K_FOREVER);
 		}
+
 		received_evt = fetch_and_process_hci_evt(&hci_buffer[0]);
+
 		if (IS_ENABLED(CONFIG_BT_CONN)) {
 			received_data = fetch_and_process_acl_data(&hci_buffer[0]);
 		}
@@ -377,23 +379,20 @@ static const struct device *entropy_source;
 
 static uint8_t rand_prio_low_vector_get(uint8_t *p_buff, uint8_t length)
 {
-	int32_t l = entropy_get_entropy_isr(entropy_source, p_buff, length, 0);
-
-	BT_ASSERT(l == length); //assert because bits are wasted here if we can't fill the buffer
-	return l;
+	return entropy_get_entropy_isr(entropy_source, p_buff, length, 0);
 }
 
 static uint8_t rand_prio_high_vector_get(uint8_t *p_buff, uint8_t length)
 {
-	uint8_t l = entropy_get_entropy_isr(entropy_source, p_buff, length, 0);
+	int ret = entropy_get_entropy_isr(entropy_source, p_buff, length, 0);
 
-	BT_ASSERT(l >= 0);
-	return l;
+	BT_ASSERT(ret >= 0);
+	return ret;
 }
 
 static void rand_prio_low_vector_get_blocking(uint8_t *p_buff, uint8_t length)
 {
-	int32_t err = entropy_get_entropy(entropy_source, p_buff, length);
+	int err = entropy_get_entropy(entropy_source, p_buff, length);
 
 	BT_ASSERT(err == 0);
 }
@@ -487,8 +486,8 @@ static int hci_driver_open(void)
 
 	err = sdc_rand_source_register(&rand_functions);
 	if (err) {
-		BT_ERR("Failed to register randomness source with the SoftDevice Controller");
-		return -EINVAL;
+		BT_ERR("Failed to register rand source (%d)", err);
+		return -ENODEV;
 	}
 
 	if (IS_ENABLED(CONFIG_BT_BROADCASTER)) {
